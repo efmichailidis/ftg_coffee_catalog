@@ -1,7 +1,7 @@
 export default async (request, context) => {
   // Ορίστε το username και το password που θέλετε
-  const USERNAME = "myuser";
-  const PASSWORD = "mypassword123";
+  const USERNAME = "ftg_user";
+  const PASSWORD = "14y2uoafzkwo1wpenh42";
 
   const authHeader = request.headers.get("authorization");
 
