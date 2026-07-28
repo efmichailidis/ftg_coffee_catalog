@@ -68,6 +68,46 @@
   .tile button.pricebtn .prc{font-weight:700; font-size:14px; color:var(--crema);}
   .tile.printing{outline:3px solid var(--crema);}
 
+  /* ---- Ειδική Επιλογή tile ---- */
+  #specialContainer{margin-top:18px;}
+  .tile.special{
+    max-width:480px;
+    background:linear-gradient(160deg, #4a2f1f, #2c1c12);
+    border:1px solid var(--crema);
+  }
+  .special-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;}
+  .special-header .name{margin:0; min-height:0;}
+  .printIconBtn{
+    background:var(--crema); border:none; border-radius:10px; width:44px; height:44px;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0;
+    transition:transform .1s ease;
+  }
+  .printIconBtn:active{transform:scale(.9);}
+  .printIconBtn svg{width:24px; height:24px;}
+  select.specialSelect{
+    width:100%; background:#efe6d8; color:#3a2418; border:none; border-radius:10px;
+    padding:14px 12px; font-size:15px; font-weight:600; margin-bottom:14px; appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233a2418'><path d='M7 10l5 5 5-5z'/></svg>");
+    background-repeat:no-repeat; background-position:right 12px center; background-size:20px;
+  }
+  .toggles{display:flex; gap:14px;}
+  .toggleRow{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:8px;
+    background:rgba(239,230,216,.08); border:1px solid rgba(201,160,106,.35);
+    border-radius:12px; padding:12px 8px;
+  }
+  .toggleRow span{font-size:13px; font-weight:600; color:var(--cream); text-align:center;}
+  .toggleSwitch{
+    width:52px; height:28px; border-radius:20px; border:none; background:#6b6b6b;
+    position:relative; cursor:pointer; transition:background .15s ease;
+  }
+  .toggleSwitch::after{
+    content:''; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%;
+    background:#fff; transition:left .15s ease;
+  }
+  .toggleSwitch.active{background:var(--ok);}
+  .toggleSwitch.active::after{left:27px;}
+
   #toast{
     position:fixed; left:50%; bottom:28px; transform:translateX(-50%) translateY(120%);
     background:var(--espresso); border:2px solid var(--crema); color:var(--cream);
@@ -92,6 +132,7 @@
 
 <main>
   <div id="grid"></div>
+  <div id="specialContainer"></div>
 
   <details>
     <summary>Πληροφορίες σύνδεσης / Αντιμετώπιση προβλημάτων</summary>
@@ -140,6 +181,16 @@ const ITEMS = [
   {name:"Φραπέ Medium", ta:{price:"1,10€", code:"2381822000002"}, sit:{price:"1,20€", code:"2390475000000"}},
   {name:"Καφές Φίλτρου Medium με επιλογή γεύσης σιροπιού", ta:{price:"1,10€", code:"2381820000004"}, sit:{price:"1,20€", code:"2390473000002"}},
   {name:"Καφές Φίλτρου Grande με επιλογή γεύσης σιροπιού", ta:{price:"1,30€", code:"2381821000003"}, sit:{price:"1,40€", code:"2390474000001"}},
+  {name:"Hot Dog", ta:{price:"0,90€", code:"2380219000007"}, sit:null},
+  {name:"Παγωτό κυπελάκι μηχανής", ta:{price:"0,95€", code:"2391100000006"}, sit:null},
+  {name:"Παγωτό χωνάκι μεγάλο", ta:{price:"0,95€", code:"2380705000009"}, sit:null},
+  {name:"Παγωτό χωνάκι μηχανής", ta:{price:"0,70€", code:"2380893000003"}, sit:null},
+  {name:"Φυσικός χυμός πορτοκάλι Medium", ta:{price:"1,70€", code:"2381835000006"}, sit:{price:"1,85€", code:"2390493000006"}},
+  {name:"Ζεστό ρόφημα σοκολάτας (επιλογή γεύσης σιροπιού)", ta:{price:"1,80€", code:"2391073000003"}, sit:{price:"1,95€", code:"2391127000003"}},
+  {name:"Κρύο ρόφημα σοκολάτας (επιλογή γεύσης σιροπιού)", ta:{price:"1,80€", code:"2391072000004"}, sit:{price:"1,95€", code:"2391126000004"}},
+  {name:"Τσάι με επιλογή γεύσεων", ta:{price:"0,95€", code:"2381833000008"}, sit:{price:"1,00€", code:"2390491000008"}},
+  {name:"Κύπελλο", ta:{price:"0,05€", code:"5208046089286"}, sit:null},
+  {name:"Κουπόνι έκπτωσης πλαστικού μιας χρήσης", ta:{price:"0,05€", code:"9821955270055"}, sit:null},
   {name:"Καπάκι και κύπελλο", ta:{price:"0,10€", code:"5208046089330"}, sit:null},
 ];
 /* ============================================================ */
@@ -171,6 +222,111 @@ function showToast(msg, isError){
   toast.className = isError ? 'show error' : 'show';
   clearTimeout(showToast._t);
   showToast._t = setTimeout(()=> toast.className = '', 2600);
+}
+
+/* ---------------- Ειδική Επιλογή tile ---------------- */
+function renderSpecialTile(){
+  const tile = document.createElement('div');
+  tile.className = 'tile special';
+
+  const header = document.createElement('div');
+  header.className = 'special-header';
+
+  const nameEl = document.createElement('div');
+  nameEl.className = 'name';
+  nameEl.textContent = 'Ειδική Επιλογή';
+  header.appendChild(nameEl);
+
+  const printBtn = document.createElement('button');
+  printBtn.className = 'printIconBtn';
+  printBtn.title = 'Εκτύπωση';
+  printBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="#3a2418"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>`;
+  header.appendChild(printBtn);
+
+  tile.appendChild(header);
+
+  const select = document.createElement('select');
+  select.className = 'specialSelect';
+  ITEMS.forEach((it, idx) => {
+    const opt = document.createElement('option');
+    opt.value = idx;
+    opt.textContent = it.name;
+    select.appendChild(opt);
+  });
+  tile.appendChild(select);
+
+  const toggles = document.createElement('div');
+  toggles.className = 'toggles';
+
+  const rowCoupon = document.createElement('div');
+  rowCoupon.className = 'toggleRow';
+  rowCoupon.innerHTML = `<span>Κουπόνι έκπτωσης</span>`;
+  const swCoupon = document.createElement('button');
+  swCoupon.className = 'toggleSwitch active';
+  swCoupon.dataset.mode = 'coupon';
+  rowCoupon.appendChild(swCoupon);
+
+  const rowCup = document.createElement('div');
+  rowCup.className = 'toggleRow';
+  rowCup.innerHTML = `<span>Κύπελο</span>`;
+  const swCup = document.createElement('button');
+  swCup.className = 'toggleSwitch';
+  swCup.dataset.mode = 'cup';
+  rowCup.appendChild(swCup);
+
+  function selectMode(mode){
+    swCoupon.classList.toggle('active', mode === 'coupon');
+    swCup.classList.toggle('active', mode === 'cup');
+  }
+  swCoupon.addEventListener('click', () => selectMode('coupon'));
+  swCup.addEventListener('click', () => selectMode('cup'));
+
+  toggles.appendChild(rowCoupon);
+  toggles.appendChild(rowCup);
+  tile.appendChild(toggles);
+
+  printBtn.addEventListener('click', () => {
+    const idx = parseInt(select.value, 10);
+    const mode = swCoupon.classList.contains('active') ? 'coupon' : 'cup';
+    printSpecialSelection(idx, mode, tile);
+  });
+
+  return tile;
+}
+
+async function printSpecialSelection(idx, mode, tileEl){
+  const item = ITEMS[idx];
+  if (!item) return;
+  const companionName = mode === 'coupon'
+    ? 'Κουπόνι έκπτωσης πλαστικού μιας χρήσης'
+    : 'Κύπελλο';
+  const companion = ITEMS.find(it => it.name === companionName);
+
+  if (!usbDevice || epOut == null){
+    showToast('Σύνδεσε πρώτα τον εκτυπωτή', true);
+    return;
+  }
+  tileEl.classList.add('printing');
+  try{
+    // Σειρά αντεστραμμένη λόγω περιστροφής 180° -> πρώτα το companion, μετά το κύριο είδος
+    if (companion){
+      const compCanvas = buildLabelCanvas(companion.name, "", null, companion.ta.code);
+      await sendToPrinter(escposFromCanvas(compCanvas));
+    } else {
+      log(`Προσοχή: δεν βρέθηκε το είδος "${companionName}" στη λίστα ITEMS.`);
+    }
+    const mainCanvas = buildLabelCanvas(item.name, "Take Away", null, item.ta.code);
+    await sendToPrinter(escposFromCanvas(mainCanvas));
+
+    await sendToPrinter(CUT_BYTES);
+    showToast(`Εκτυπώθηκε: ${item.name} + ${companionName}`);
+  }catch(err){
+    log('Σφάλμα εκτύπωσης: ' + err);
+    showToast('Σφάλμα εκτύπωσης — δες Πληροφορίες σύνδεσης', true);
+    if (String(err).includes('transfer') || String(err).includes('device')) { setConnected(false); }
+  }finally{
+    setTimeout(()=> tileEl.classList.remove('printing'), 400);
+  }
 }
 
 /* ---------------- Απόδοση tiles ---------------- */
@@ -207,6 +363,7 @@ function renderGrid(filter){
     grid.appendChild(tile);
   });
 }
+document.getElementById('specialContainer').appendChild(renderSpecialTile());
 renderGrid();
 searchInput.addEventListener('input', () => renderGrid(searchInput.value));
 
