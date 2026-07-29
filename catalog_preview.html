@@ -139,6 +139,13 @@
     <div id="log"></div>
   </details>
 </main>
+<div id="previewModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:9999;padding:20px;overflow:auto">
+<div style="max-width:90mm;margin:0 auto;background:#ddd;padding:10px;border-radius:12px">
+<h2 style="color:black">Προεπισκόπηση Εκτύπωσης</h2>
+<div id="previewContent"></div>
+<button onclick="document.getElementById('previewModal').style.display='none'">Κλείσιμο</button>
+</div></div>
+
 
 <div id="toast"></div>
 
@@ -297,38 +304,36 @@ function renderSpecialTile(){
 async function printSpecialSelection(idx, mode, tileEl){
   const item = ITEMS[idx];
   if (!item) return;
-  const companionName = mode === 'coupon'
-    ? 'Κουπόνι έκπτωσης πλαστικού μιας χρήσης'
-    : 'Κύπελλο';
+
+  const companionName = mode === "coupon"
+    ? "Κουπόνι έκπτωσης πλαστικού μιας χρήσης"
+    : "Κύπελλο";
+
   const companion = ITEMS.find(it => it.name === companionName);
 
-  if (!usbDevice || epOut == null){
-    showToast('Σύνδεσε πρώτα τον εκτυπωτή', true);
-    return;
-  }
   tileEl.classList.add('printing');
+
   try{
-    // Σειρά αντεστραμμένη λόγω περιστροφής 180° -> πρώτα το companion, μετά το κύριο είδος
+    const labels = [];
+
+    const mainCanvas = buildLabelCanvas(item.name, "Take Away", null, item.ta.code);
+    labels.push(mainCanvas.toDataURL('image/png'));
+
     if (companion){
       const compCanvas = buildLabelCanvas(companion.name, "", null, companion.ta.code);
-      await sendToPrinter(escposFromCanvas(compCanvas));
-    } else {
-      log(`Προσοχή: δεν βρέθηκε το είδος "${companionName}" στη λίστα ITEMS.`);
+      labels.push(compCanvas.toDataURL('image/png'));
     }
-    const mainCanvas = buildLabelCanvas(item.name, "Take Away", null, item.ta.code);
-    await sendToPrinter(escposFromCanvas(mainCanvas));
 
-    await sendToPrinter(CUT_BYTES);
-    showToast(`Εκτυπώθηκε: ${item.name} + ${companionName}`);
+    showPrintPreview(labels);
+    showToast(`Προεπισκόπηση: ${item.name} + ${companionName}`);
+
   }catch(err){
-    log('Σφάλμα εκτύπωσης: ' + err);
-    showToast('Σφάλμα εκτύπωσης — δες Πληροφορίες σύνδεσης', true);
-    if (String(err).includes('transfer') || String(err).includes('device')) { setConnected(false); }
+    log('Σφάλμα προεπισκόπησης: ' + err);
+    showToast('Σφάλμα προεπισκόπησης', true);
   }finally{
     setTimeout(()=> tileEl.classList.remove('printing'), 400);
   }
 }
-
 /* ---------------- Απόδοση tiles ---------------- */
 function renderGrid(filter){
   grid.innerHTML = '';
@@ -546,6 +551,23 @@ function escposFromCanvas(canvas){
 // Εντολή κοπής χαρτιού — στέλνεται ξεχωριστά, μία φορά, στο τέλος όλης της εκτύπωσης
 const CUT_BYTES = new Uint8Array([0x1D,0x56,0x42,0x00]); // GS V B 0 partial cut
 
+function showPrintPreview(labels){
+ const c=document.getElementById('previewContent');
+ c.innerHTML='';
+ labels.forEach(src=>{
+   const img=document.createElement('img');
+   img.src=src;
+   img.style.width='80mm';
+   img.style.display='block';
+   img.style.margin='0 auto 12px auto';
+   img.style.background='white';
+   img.style.border='1px solid #ccc';
+   c.appendChild(img);
+ });
+ document.getElementById('previewModal').style.display='block';
+}
+
+
 async function sendToPrinter(bytes){
   const CHUNK = 8192;
   for (let i=0;i<bytes.length;i+=CHUNK){
@@ -555,42 +577,37 @@ async function sendToPrinter(bytes){
 
 /* ---------------- Εκτύπωση προϊόντος ---------------- */
 const LID_ITEM_NAME = "Καπάκι και κύπελλο";
+const NO_LID_ITEMS = [
+  "Hot Dog",
+  "Παγωτό κυπελάκι μηχανής",
+  "Παγωτό χωνάκι μεγάλο",
+  "Παγωτό χωνάκι μηχανής"
+];
 
 async function printItem(name, code, variant, price, tileEl){
-  if (!usbDevice || epOut == null){
-    showToast('Σύνδεσε πρώτα τον εκτυπωτή', true);
-    return;
-  }
   tileEl.classList.add('printing');
   try{
-    // Επειδή η εκτύπωση είναι περιστραμμένη 180°, η σειρά εκτύπωσης στο χαρτί
-    // πρέπει να είναι ανάποδη ώστε να διαβάζεται σωστά: επιλεγμένο είδος πρώτα, μετά καπάκι/κύπελλο.
+    const lid = (name !== LID_ITEM_NAME && !NO_LID_ITEMS.includes(name))
+      ? ITEMS.find(it => it.name === LID_ITEM_NAME)
+      : null;
 
-    // 1) Πρώτα στέλνεται στο χαρτί το "Καπάκι και κύπελλο" (θα εμφανιστεί ΔΕΥΤΕΡΟ μετά την περιστροφή)
-    const lid = name !== LID_ITEM_NAME ? ITEMS.find(it => it.name === LID_ITEM_NAME) : null;
+    const labels = [];
+
+    const printedVariant = (name === LID_ITEM_NAME) ? '' : variant;
+    const itemCanvas = buildLabelCanvas(name, printedVariant, null, code);
+    labels.push(itemCanvas.toDataURL('image/png'));
+
     if (lid){
-      const lidCanvas = buildLabelCanvas(lid.name, "", null, lid.ta.code);
-      await sendToPrinter(escposFromCanvas(lidCanvas));
-    } else {
-      log(`Προσοχή: δεν βρέθηκε το είδος "${LID_ITEM_NAME}" στη λίστα ITEMS.`);
+      const lidCanvas = buildLabelCanvas(lid.name, '', null, lid.ta.code);
+      labels.push(lidCanvas.toDataURL('image/png'));
     }
 
-    // 2) Μετά στέλνεται το επιλεγμένο είδος (θα εμφανιστεί ΠΡΩΤΟ μετά την περιστροφή)
-    const printedVariant = (name === LID_ITEM_NAME) ? "" : variant;
-    const canvas = buildLabelCanvas(name, printedVariant, null, code);
-    await sendToPrinter(escposFromCanvas(canvas));
-
-    // 3) Κοπή χαρτιού μία φορά, στο τέλος
-    await sendToPrinter(CUT_BYTES);
-
-    showToast(`Εκτυπώθηκε: ${name} (${variant}) + Καπάκι και κύπελλο`);
+    showPrintPreview(labels);
+    showToast('Έγινε προεπισκόπηση εκτύπωσης');
   }catch(err){
-    log('Σφάλμα εκτύπωσης: ' + err);
-    showToast('Σφάλμα εκτύπωσης — δες Πληροφορίες σύνδεσης', true);
-    // Αν χάθηκε η σύνδεση, μηδένισε την κατάσταση
-    if (String(err).includes('transfer') || String(err).includes('device')) { setConnected(false); }
+    log('Σφάλμα προεπισκόπησης: ' + err);
   }finally{
-    setTimeout(()=> tileEl.classList.remove('printing'), 400);
+    setTimeout(() => tileEl.classList.remove('printing'), 400);
   }
 }
 </script>
