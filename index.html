@@ -555,6 +555,12 @@ async function sendToPrinter(bytes){
 
 /* ---------------- Εκτύπωση προϊόντος ---------------- */
 const LID_ITEM_NAME = "Καπάκι και κύπελλο";
+const NO_LID_ITEMS = [
+  "Hot Dog",
+  "Παγωτό κυπελάκι μηχανής",
+  "Παγωτό χωνάκι μεγάλο",
+  "Παγωτό χωνάκι μηχανής"
+];
 
 async function printItem(name, code, variant, price, tileEl){
   if (!usbDevice || epOut == null){
@@ -567,7 +573,7 @@ async function printItem(name, code, variant, price, tileEl){
     // πρέπει να είναι ανάποδη ώστε να διαβάζεται σωστά: επιλεγμένο είδος πρώτα, μετά καπάκι/κύπελλο.
 
     // 1) Πρώτα στέλνεται στο χαρτί το "Καπάκι και κύπελλο" (θα εμφανιστεί ΔΕΥΤΕΡΟ μετά την περιστροφή)
-    const lid = name !== LID_ITEM_NAME ? ITEMS.find(it => it.name === LID_ITEM_NAME) : null;
+    const lid = (name !== LID_ITEM_NAME && !NO_LID_ITEMS.includes(name)) ? ITEMS.find(it => it.name === LID_ITEM_NAME) : null;
     if (lid){
       const lidCanvas = buildLabelCanvas(lid.name, "", null, lid.ta.code);
       await sendToPrinter(escposFromCanvas(lidCanvas));
@@ -583,7 +589,11 @@ async function printItem(name, code, variant, price, tileEl){
     // 3) Κοπή χαρτιού μία φορά, στο τέλος
     await sendToPrinter(CUT_BYTES);
 
-    showToast(`Εκτυπώθηκε: ${name} (${variant}) + Καπάκι και κύπελλο`);
+    showToast(
+      lid
+        ? `Εκτυπώθηκε: ${name} (${variant}) + Καπάκι και κύπελλο`
+        : `Εκτυπώθηκε: ${name} (${variant})`
+    );
   }catch(err){
     log('Σφάλμα εκτύπωσης: ' + err);
     showToast('Σφάλμα εκτύπωσης — δες Πληροφορίες σύνδεσης', true);
