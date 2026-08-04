@@ -349,8 +349,8 @@ async function disconnect(){
 function setConnected(on){
   connBtn.classList.toggle('connected', on);
   if (on){
-    printer_id == EPSON_VID ? 'Συνδεδεμένος (Epson)' : '';
-    printer_id == SUMNI_VID ? 'Συνδεδεμένος (Sunmi)' : '';
+    connLabel.textContent = printer_id === EPSON_VID ? 'Συνδεδεμένος (Epson)' : '';
+    connLabel.textContent = printer_id === SUMNI_VID ? 'Συνδεδεμένος (SUNMI)' : '';
   } else {
     connLabel.textContent = 'Σύνδεση Εκτυπωτή';
   }
