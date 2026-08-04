@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Barcode Ροφημάτων — Food to Go</title>
+<!-- JsBarcode v3.11.5 (MIT) — ενσωματωμένο, λειτουργεί OFFLINE -->
+<script src="js/barcode.js"></script>
+<link rel="stylesheet" type="text/css" href="css/style.css" />
+</head>
+<body>
+
+<header>
+  <h1>Ροφήματα <span>· Food to Go</span></h1>
+  <input id="search" placeholder="Αναζήτηση προϊόντος...">
+  <button id="connBtn"><span id="dot"></span><span id="connLabel">Σύνδεση Εκτυπωτή</span></button>
+</header>
+
+<main>
+  <div id="grid"></div>
+  <div id="specialContainer"></div>
+
+  <details>
+    <summary>Πληροφορίες σύνδεσης / Αντιμετώπιση προβλημάτων</summary>
+    <div id="log"></div>
+  </details>
+</main>
+
+<div id="toast"></div>
+
+<!-- κρυφό canvas για δημιουργία της ετικέτας -->
+<canvas id="work" style="display:none;"></canvas>
+<script src="js/items.js"></script>
+<script>
+
+/* ============================================================
+   ΕΚΤΥΠΩΤΗΣ: Epson TM-m30 (ESC/POS) μέσω USB-C -> Samsung Galaxy
+   Σύνδεση με WebUSB (Chrome σε Android). Vendor ID Epson = 0x04B8.
+   Πλάτος χαρτιού 80mm -> 576 dots εκτυπώσιμα @203dpi.
+   ============================================================ */
+const EPSON_VID = 0x04b8;
+const PRINTER_DOTS = 576;   // εκτυπώσιμο πλάτος 80mm
+
+let usbDevice = null, epOut = null, usbIface = null;
+
+const connBtn   = document.getElementById('connBtn');
+const connLabel = document.getElementById('connLabel');
+const toast     = document.getElementById('toast');
+const logEl     = document.getElementById('log');
+const grid      = document.getElementById('grid');
+const searchInput = document.getElementById('search');
+
+function log(msg){
+  const t = new Date().toLocaleTimeString();
+  logEl.textContent += `[${t}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function showToast(msg, isError){
+  toast.textContent = msg;
+  toast.className = isError ? 'show error' : 'show';
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(()=> toast.className = '', 2600);
+}
+
+/* ---------------- Ειδική Επιλογή tile ---------------- */
+function renderSpecialTile(){
+  const tile = document.createElement('div');
+  tile.className = 'tile special';
+
+  const header = document.createElement('div');
+  header.className = 'special-header';
+
+  const nameEl = document.createElement('div');
+  nameEl.className = 'name';
+  nameEl.textContent = 'Ειδική Επιλογή';
+  header.appendChild(nameEl);
+
+  const printBtn = document.createElement('button');
+  printBtn.className = 'printIconBtn';
+  printBtn.title = 'Εκτύπωση';
+  printBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="#3a2418"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>`;
+  header.appendChild(printBtn);
+
+  tile.appendChild(header);
+
+  const select = document.createElement('select');
+  select.className = 'specialSelect';
+  ITEMS.forEach((it, idx) => {
+    const opt = document.createElement('option');
+    opt.value = idx;
+    opt.textContent = it.name;
+    select.appendChild(opt);
+  });
+  tile.appendChild(select);
+
+  const toggles = document.createElement('div');
+  toggles.className = 'toggles';
+
+  const rowCoupon = document.createElement('div');
+  rowCoupon.className = 'toggleRow';
+  rowCoupon.innerHTML = `<span>Κουπόνι έκπτωσης</span>`;
+  const swCoupon = document.createElement('button');
+  swCoupon.className = 'toggleSwitch active';
+  swCoupon.dataset.mode = 'coupon';
+  rowCoupon.appendChild(swCoupon);
+
+  const rowCup = document.createElement('div');
+  rowCup.className = 'toggleRow';
+  rowCup.innerHTML = `<span>Κύπελο</span>`;
+  const swCup = document.createElement('button');
+  swCup.className = 'toggleSwitch';
+  swCup.dataset.mode = 'cup';
+  rowCup.appendChild(swCup);
+
+  function selectMode(mode){
+    swCoupon.classList.toggle('active', mode === 'coupon');
+    swCup.classList.toggle('active', mode === 'cup');
+  }
+  swCoupon.addEventListener('click', () => selectMode('coupon'));
+  swCup.addEventListener('click', () => selectMode('cup'));
+
+  toggles.appendChild(rowCoupon);
+  toggles.appendChild(rowCup);
+  tile.appendChild(toggles);
+
+  printBtn.addEventListener('click', () => {
+    const idx = parseInt(select.value, 10);
+    const mode = swCoupon.classList.contains('active') ? 'coupon' : 'cup';
+    printSpecialSelection(idx, mode, tile);
+  });
+
+  return tile;
+}
+
+async function printSpecialSelection(idx, mode, tileEl){
+  const item = ITEMS[idx];
+  if (!item) return;
+  const companionName = mode === 'coupon'
+    ? 'Κουπόνι έκπτωσης πλαστικού μιας χρήσης'
+    : 'Κύπελλο';
+  const companion = ITEMS.find(it => it.name === companionName);
+
+  if (!usbDevice || epOut == null){
+    showToast('Σύνδεσε πρώτα τον εκτυπωτή', true);
+    return;
+  }
+  tileEl.classList.add('printing');
+  try{
+    // Σειρά αντεστραμμένη λόγω περιστροφής 180° -> πρώτα το companion, μετά το κύριο είδος
+    if (companion){
+      const compCanvas = buildLabelCanvas(companion.name, "", null, companion.ta.code);
+      await sendToPrinter(escposFromCanvas(compCanvas));
+    } else {
+      log(`Προσοχή: δεν βρέθηκε το είδος "${companionName}" στη λίστα ITEMS.`);
+    }
+    const mainCanvas = buildLabelCanvas(item.name, "Take Away", null, item.ta.code);
+    await sendToPrinter(escposFromCanvas(mainCanvas));
+
+    await sendToPrinter(CUT_BYTES);
+    showToast(`Εκτυπώθηκε: ${item.name} + ${companionName}`);
+  }catch(err){
+    log('Σφάλμα εκτύπωσης: ' + err);
+    showToast('Σφάλμα εκτύπωσης — δες Πληροφορίες σύνδεσης', true);
+    if (String(err).includes('transfer') || String(err).includes('device')) { setConnected(false); }
+  }finally{
+    setTimeout(()=> tileEl.classList.remove('printing'), 400);
+  }
+}
+
+/* ---------------- Απόδοση tiles ---------------- */
+function renderGrid(filter){
+  grid.innerHTML = '';
+  const f = (filter||'').trim().toLowerCase();
+  ITEMS.filter(it => !f || it.name.toLowerCase().includes(f)).forEach(item => {
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'name';
+    nameEl.textContent = item.name;
+    tile.appendChild(nameEl);
+
+    const btns = document.createElement('div');
+    btns.className = 'btns';
+
+    const taBtn = document.createElement('button');
+    taBtn.className = 'pricebtn ta';
+    taBtn.innerHTML = `<span class="lbl">Take Away</span>`;
+    taBtn.addEventListener('click', () => printItem(item.name, item.ta.code, 'Take Away', item.ta.price, tile));
+    btns.appendChild(taBtn);
+
+    if (item.sit){
+      const sitBtn = document.createElement('button');
+      sitBtn.className = 'pricebtn sit';
+      sitBtn.innerHTML = `<span class="lbl">Καθήμενων</span>`;
+      sitBtn.addEventListener('click', () => printItem(item.name, item.sit.code, 'Καθήμενων', item.sit.price, tile));
+      btns.appendChild(sitBtn);
+    }
+
+    tile.appendChild(btns);
+    grid.appendChild(tile);
+  });
+}
+document.getElementById('specialContainer').appendChild(renderSpecialTile());
+renderGrid();
+searchInput.addEventListener('input', () => renderGrid(searchInput.value));
+
+/* ---------------- WebUSB σύνδεση ---------------- */
+connBtn.addEventListener('click', async () => {
+  if (usbDevice){ await disconnect(); return; }
+  if (!navigator.usb){
+    showToast('Ο browser δεν υποστηρίζει WebUSB — χρησιμοποίησε Chrome σε Android', true);
+    log('navigator.usb δεν υπάρχει (χρειάζεται Chrome/Android + ασφαλές context https ή localhost).');
+    return;
+  }
+  try{
+    const dev = await navigator.usb.requestDevice({ filters:[{ vendorId: EPSON_VID }] });
+    await openDevice(dev);
+    usbDevice = dev;
+    setConnected(true);
+    showToast('Ο εκτυπωτής συνδέθηκε');
+  }catch(err){
+    log('Σφάλμα σύνδεσης: ' + err);
+    showToast('Αποτυχία σύνδεσης — δες Πληροφορίες σύνδεσης', true);
+    setConnected(false);
+  }
+});
+
+async function openDevice(dev){
+  log('Άνοιγμα: ' + (dev.productName || 'Epson') + ' (VID 0x' + dev.vendorId.toString(16) + ')');
+  await dev.open();
+  if (!dev.configuration) await dev.selectConfiguration(1);
+
+  // Βρες interface με bulk OUT endpoint (προτίμηση κλάσης εκτυπωτή 0x07)
+  let chosen = null;
+  for (const iface of dev.configuration.interfaces){
+    for (const alt of iface.alternates){
+      const out = alt.endpoints.find(e => e.direction === 'out' && e.type === 'bulk');
+      if (out){
+        const cand = { ifaceNum: iface.interfaceNumber, alt: alt.alternateSetting, ep: out.endpointNumber, cls: alt.interfaceClass };
+        if (!chosen || cand.cls === 7) chosen = cand;
+        if (cand.cls === 7) break;
+      }
+    }
+    if (chosen && chosen.cls === 7) break;
+  }
+  if (!chosen) throw new Error('Δεν βρέθηκε bulk OUT endpoint στον εκτυπωτή');
+
+  await dev.claimInterface(chosen.ifaceNum);
+  if (chosen.alt) { try { await dev.selectAlternateInterface(chosen.ifaceNum, chosen.alt); } catch(e){} }
+  epOut = chosen.ep;
+  usbIface = chosen.ifaceNum;
+  log(`Έτοιμος: interface ${usbIface}, endpoint OUT ${epOut}, class 0x${chosen.cls.toString(16)}`);
+}
+
+async function disconnect(){
+  try { if (usbDevice && usbIface != null) await usbDevice.releaseInterface(usbIface); } catch(e){}
+  try { if (usbDevice) await usbDevice.close(); } catch(e){}
+  usbDevice = null; epOut = null; usbIface = null;
+  setConnected(false);
+  showToast('Ο εκτυπωτής αποσυνδέθηκε');
+}
+
+function setConnected(on){
+  connBtn.classList.toggle('connected', on);
+  connLabel.textContent = on ? 'Συνδεδεμένος' : 'Σύνδεση Εκτυπωτή';
+}
+
+// Αυτόματη επανασύνδεση αν έχει ήδη δοθεί άδεια (μία φορά -> κάθε φορά)
+async function tryReconnect(){
+  if (!navigator.usb) {
+    showToast('Ο browser δεν υποστηρίζει WebUSB — χρησιμοποίησε Chrome σε Android', true);
+    return;
+  }
+  try{
+    const devs = await navigator.usb.getDevices();
+    const epson = devs.find(d => d.vendorId === EPSON_VID);
+    if (epson){
+      await openDevice(epson);
+      usbDevice = epson;
+      setConnected(true);
+      log('Αυτόματη επανασύνδεση με αποθηκευμένο εκτυπωτή.');
+    }
+  }catch(err){ log('Επανασύνδεση απέτυχε: ' + err); }
+}
+if (navigator.usb){
+  navigator.usb.addEventListener('disconnect', e => {
+    if (usbDevice && e.device === usbDevice){
+      usbDevice = null; epOut = null; usbIface = null;
+      setConnected(false);
+      showToast('Ο εκτυπωτής αποσυνδέθηκε', true);
+      log('Ο εκτυπωτής αποσυνδέθηκε φυσικά.');
+    }
+  });
+}
+tryReconnect();
+
+/* ---------------- Δημιουργία ετικέτας (canvas) ---------------- */
+function wrapText(ctx, text, maxWidth){
+  const words = text.split(' ');
+  const lines = [];
+  let line = '';
+  for (const w of words){
+    const test = line ? line + ' ' + w : w;
+    if (ctx.measureText(test).width > maxWidth && line){
+      lines.push(line); line = w;
+    } else { line = test; }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function buildLabelCanvas(name, variant, price, code){
+  const W = PRINTER_DOTS, pad = 16;
+
+  // 1) Barcode σε δικό του canvas (offline μέσω JsBarcode)
+  const bc = document.createElement('canvas');
+  JsBarcode(bc, code, {
+    format:"EAN13", width:3, height:150, displayValue:true,
+    fontSize:30, textMargin:4, margin:10, background:"#ffffff", lineColor:"#000000"
+  });
+
+  // 2) Μέτρηση κειμένου/wrapping
+  const meas = document.getElementById('work').getContext('2d');
+  const brandFont = "600 22px 'Segoe UI', system-ui, sans-serif";
+  const nameFont  = "bold 40px 'Segoe UI', system-ui, sans-serif";
+  const metaFont  = "28px 'Segoe UI', system-ui, sans-serif";
+  meas.font = nameFont;
+  const nameLines = wrapText(meas, name, W - pad*2);
+
+  const brandH = 34, nameLineH = 48, metaH = variant ? 42 : 0, gap = variant ? 20 : 8;
+  const totalH = pad + brandH + nameLines.length*nameLineH + 8 + metaH + gap + bc.height + pad;
+
+  // 3) Ζωγράφισμα τελικής ετικέτας
+  const canvas = document.getElementById('work');
+  canvas.width = W; canvas.height = totalH;
+  const c = canvas.getContext('2d');
+  c.fillStyle = "#ffffff"; c.fillRect(0,0,W,totalH);
+  c.fillStyle = "#000000"; c.textAlign = "center"; c.textBaseline = "alphabetic";
+
+  let y = pad;
+  c.font = brandFont; c.fillText("SKLAVENITIS · FOOD TO GO", W/2, y+24); y += brandH;
+  c.font = nameFont;
+  for (const ln of nameLines){ c.fillText(ln, W/2, y+38); y += nameLineH; }
+  y += 8;
+  if (variant){ c.font = metaFont; c.fillText(`${variant}`, W/2, y+30); y += metaH; }
+  y += gap;
+  c.drawImage(bc, Math.round((W - bc.width)/2), y);
+
+  return canvas;
+}
+
+/* ---------------- Canvas -> ESC/POS raster ---------------- */
+function escposFromCanvas(canvas){
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  const img = ctx.getImageData(0,0,w,h).data;
+  const bytesPerRow = Math.ceil(w/8);
+  const raster = new Uint8Array(bytesPerRow*h);
+  for (let y=0;y<h;y++){
+    for (let x=0;x<w;x++){
+      // Δειγματοληψία από το ανάποδο σημείο -> περιστροφή εκτύπωσης κατά 180°
+      const idx=((h-1-y)*w + (w-1-x))*4;
+      const bright=(img[idx]+img[idx+1]+img[idx+2])/3;
+      if (bright < 128) raster[y*bytesPerRow + (x>>3)] |= (0x80 >> (x%8));
+    }
+  }
+  const xL=bytesPerRow&0xFF, xH=(bytesPerRow>>8)&0xFF;
+  const yL=h&0xFF, yH=(h>>8)&0xFF;
+  const header = new Uint8Array([
+    0x1B,0x40,             // ESC @  init
+    0x1B,0x61,0x01,        // ESC a 1  center
+    0x1D,0x76,0x30,0x00,   // GS v 0 m=0  raster
+    xL,xH,yL,yH
+  ]);
+  const footer = new Uint8Array([
+    0x1B,0x64,0x03         // ESC d 3  feed 3 lines (χωρίς κοπή εδώ)
+  ]);
+  const out = new Uint8Array(header.length + raster.length + footer.length);
+  out.set(header,0); out.set(raster,header.length); out.set(footer,header.length+raster.length);
+  return out;
+}
+
+// Εντολή κοπής χαρτιού — στέλνεται ξεχωριστά, μία φορά, στο τέλος όλης της εκτύπωσης
+const CUT_BYTES = new Uint8Array([0x1D,0x56,0x42,0x00]); // GS V B 0 partial cut
+
+async function sendToPrinter(bytes){
+  const CHUNK = 8192;
+  for (let i=0;i<bytes.length;i+=CHUNK){
+    await usbDevice.transferOut(epOut, bytes.slice(i, i+CHUNK));
+  }
+}
+
+/* ---------------- Εκτύπωση προϊόντος ---------------- */
+const LID_ITEM_NAME = "Καπάκι και κύπελλο";
+const NO_LID_ITEMS = [
+  "Hot Dog",
+  "Παγωτό κυπελάκι μηχανής",
+  "Παγωτό χωνάκι μεγάλο",
+  "Παγωτό χωνάκι μηχανής"
+];
+
+async function printItem(name, code, variant, price, tileEl){
+  if (!usbDevice || epOut == null){
+    showToast('Σύνδεσε πρώτα τον εκτυπωτή', true);
+    return;
+  }
+  tileEl.classList.add('printing');
+  try{
+    // Επειδή η εκτύπωση είναι περιστραμμένη 180°, η σειρά εκτύπωσης στο χαρτί
+    // πρέπει να είναι ανάποδη ώστε να διαβάζεται σωστά: επιλεγμένο είδος πρώτα, μετά καπάκι/κύπελλο.
+
+    // 1) Πρώτα στέλνεται στο χαρτί το "Καπάκι και κύπελλο" (θα εμφανιστεί ΔΕΥΤΕΡΟ μετά την περιστροφή)
+    const lid = (name !== LID_ITEM_NAME && !NO_LID_ITEMS.includes(name)) ? ITEMS.find(it => it.name === LID_ITEM_NAME) : null;
+    if (lid){
+      const lidCanvas = buildLabelCanvas(lid.name, "", null, lid.ta.code);
+      await sendToPrinter(escposFromCanvas(lidCanvas));
+    } else {
+      log(`Προσοχή: δεν βρέθηκε το είδος "${LID_ITEM_NAME}" στη λίστα ITEMS.`);
+    }
+
+    // 2) Μετά στέλνεται το επιλεγμένο είδος (θα εμφανιστεί ΠΡΩΤΟ μετά την περιστροφή)
+    const printedVariant = (name === LID_ITEM_NAME) ? "" : variant;
+    const canvas = buildLabelCanvas(name, printedVariant, null, code);
+    await sendToPrinter(escposFromCanvas(canvas));
+
+    // 3) Κοπή χαρτιού μία φορά, στο τέλος
+    await sendToPrinter(CUT_BYTES);
+
+    showToast(
+      lid
+        ? `Εκτυπώθηκε: ${name} (${variant}) + Καπάκι και κύπελλο`
+        : `Εκτυπώθηκε: ${name} (${variant})`
+    );
+  }catch(err){
+    log('Σφάλμα εκτύπωσης: ' + err);
+    showToast('Σφάλμα εκτύπωσης — δες Πληροφορίες σύνδεσης', true);
+    // Αν χάθηκε η σύνδεση, μηδένισε την κατάσταση
+    if (String(err).includes('transfer') || String(err).includes('device')) { setConnected(false); }
+  }finally{
+    setTimeout(()=> tileEl.classList.remove('printing'), 400);
+  }
+}
+</script>
+</body>
+</html>
