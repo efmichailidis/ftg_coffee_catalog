@@ -349,8 +349,17 @@ async function disconnect(){
 function setConnected(on){
   connBtn.classList.toggle('connected', on);
   if (on){
-    connLabel.textContent = printer_id === EPSON_VID ? 'Συνδεδεμένος (Epson)' : '';
-    connLabel.textContent = printer_id === SUMNI_VID ? 'Συνδεδεμένος (SUNMI)' : '';
+    connLabel.textContent = '';
+
+    if (printer_id === EPSON_VID) {
+      connLabel.textContent = 'Συνδεδεμένος (Epson)';
+    }
+
+    if (printer_id === SUMNI_VID) {
+      connLabel.textContent = 'Συνδεδεμένος (SUNMI)';
+    }
+    // connLabel.textContent = printer_id === EPSON_VID ? 'Συνδεδεμένος (Epson)' : '';
+    // connLabel.textContent = printer_id === SUMNI_VID ? 'Συνδεδεμένος (SUNMI)' : '';
   } else {
     connLabel.textContent = 'Σύνδεση Εκτυπωτή';
   }
