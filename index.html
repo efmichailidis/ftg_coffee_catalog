@@ -349,7 +349,8 @@ async function disconnect(){
 function setConnected(on){
   connBtn.classList.toggle('connected', on);
   if (on){
-    connLabel.textContent = printerMode === 'usb' ? 'Συνδεδεμένος (Epson)' : 'Συνδεδεμένος (Sunmi)';
+    printer_id == EPSON_VID ? 'Συνδεδεμένος (Epson)' : '';
+    printer_id == SUMNI_VID ? 'Συνδεδεμένος (Sunmi)' : '';
   } else {
     connLabel.textContent = 'Σύνδεση Εκτυπωτή';
   }
