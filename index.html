@@ -13,14 +13,13 @@
 <header>
   <h1>Ροφήματα <span>· Food to Go</span></h1>
   <input id="search" placeholder="Αναζήτηση προϊόντος...">
-  <div id="connWrap"></div>
+  <div id="connWrap">
     <button id="connBtn"><span id="dot"></span><span id="connLabel">Σύνδεση Εκτυπωτή</span></button>
     <div id="connMenu">
-      <button id="epson">🖨️ Epson (USB)</button>
-      <button id="sunmi">🖨️ Sunmi (Bluetooth)</button>
+      <button id="btnConnUSB">🖨️ Epson (USB)</button>
+      <button id="btnConnSerial">🖨️ Sunmi (Bluetooth)</button>
     </div>
   </div>
-  <!-- <button id="connBtn"><span id="dot"></span><span id="connLabel">Σύνδεση Εκτυπωτή</span></button> -->
 </header>
 
 <main>
@@ -41,16 +40,28 @@
 <script>
 
 /* ============================================================
-   ΕΚΤΥΠΩΤΗΣ: Epson TM-m30 (ESC/POS) μέσω USB-C -> Samsung Galaxy
-   Σύνδεση με WebUSB (Chrome σε Android). Vendor ID Epson = 0x04B8.
-   Πλάτος χαρτιού 80mm -> 576 dots εκτυπώσιμα @203dpi.
+   ΕΚΤΥΠΩΤΗΣ: υποστηρίζονται 2 τύποι, επιλέγονται από το μενού
+   σύνδεσης:
+   1) Epson TM-m30 (ESC/POS) μέσω WebUSB (Vendor ID 0x04B8)
+   2) Ενσωματωμένος εκτυπωτής Sunmi μέσω Web Serial πάνω από
+      Bluetooth Classic SPP (συσκευή "InnerPrinter")
+   Και οι δύο μιλάνε ESC/POS — ο κώδικας δημιουργίας ετικέτας
+   είναι κοινός, αλλάζει μόνο το "στρώμα" μεταφοράς bytes.
+   ΠΡΟΣΟΧΗ πλάτος χαρτιού: 576 dots για 80mm, 384 dots για 58mm.
    ============================================================ */
 const EPSON_VID = 0x04b8;
 const SUMNI_VID = 0x324F;
 var printer_id; 
-const PRINTER_DOTS = 576;   // εκτυπώσιμο πλάτος 80mm
+const PRINTER_DOTS = 576;   // εκτυπώσιμο πλάτος 80mm (βάλε 384 αν είναι 58mm)
 
+let printerMode = null;               // 'usb' | 'serial' | null
 let usbDevice = null, epOut = null, usbIface = null;
+let serialPort = null, serialWriter = null;
+
+function isConnected(){
+  return (printerMode === 'usb' && usbDevice && epOut != null) ||
+         (printerMode === 'serial' && serialPort && serialWriter);
+}
 
 const connBtn   = document.getElementById('connBtn');
 const connLabel = document.getElementById('connLabel');
@@ -58,35 +69,6 @@ const toast     = document.getElementById('toast');
 const logEl     = document.getElementById('log');
 const grid      = document.getElementById('grid');
 const searchInput = document.getElementById('search');
-
-const connMenu     = document.getElementById('connMenu');
-const epson    = document.getElementById('epson');
-const sunmi = document.getElementById('sunmi');
-
-connBtn.addEventListener('click', async (e) => {
-  e.stopPropagation();
-  if (isConnected()){ await disconnect(); return; }
-  connMenu.classList.toggle('open');
-});
-document.addEventListener('click', (e) => {
-  if (connMenu.classList.contains('open') && !connMenu.contains(e.target) && e.target !== connBtn){
-    connMenu.classList.remove('open');
-  }
-});
-
-epson.addEventListener('click', async (e) => {
-  e.stopPropagation();
-  connMenu.classList.remove('open');
-  printer_id = EPSON_VID;
-  await connectUSB();
-});
-
-sunmi.addEventListener('click', async (e) => {
-  e.stopPropagation();
-  connMenu.classList.remove('open');
-  printer_id = SUMNI_VID;
-  await connectUSB();
-});
 
 function log(msg){
   const t = new Date().toLocaleTimeString();
@@ -170,8 +152,6 @@ function renderSpecialTile(){
   return tile;
 }
 
-
-
 async function printSpecialSelection(idx, mode, tileEl){
   const item = ITEMS[idx];
   if (!item) return;
@@ -180,7 +160,7 @@ async function printSpecialSelection(idx, mode, tileEl){
     : 'Κύπελλο';
   const companion = ITEMS.find(it => it.name === companionName);
 
-  if (!usbDevice || epOut == null){
+  if (!isConnected()){
     showToast('Σύνδεσε πρώτα τον εκτυπωτή', true);
     return;
   }
@@ -201,7 +181,7 @@ async function printSpecialSelection(idx, mode, tileEl){
   }catch(err){
     log('Σφάλμα εκτύπωσης: ' + err);
     showToast('Σφάλμα εκτύπωσης — δες Πληροφορίες σύνδεσης', true);
-    if (String(err).includes('transfer') || String(err).includes('device')) { setConnected(false); }
+    if (String(err).includes('lost') || String(err).includes('device') || String(err).includes('closed') || String(err).includes('transfer')) { setConnected(false); printerMode = null; }
   }finally{
     setTimeout(()=> tileEl.classList.remove('printing'), 400);
   }
@@ -245,21 +225,71 @@ document.getElementById('specialContainer').appendChild(renderSpecialTile());
 renderGrid();
 searchInput.addEventListener('input', () => renderGrid(searchInput.value));
 
+/* ---------------- Σύνδεση εκτυπωτή (USB Epson ή Bluetooth Sunmi) ---------------- */
+const connMenu     = document.getElementById('connMenu');
+const btnConnUSB    = document.getElementById('btnConnUSB');
+const btnConnSerial = document.getElementById('btnConnSerial');
+
+connBtn.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (isConnected()){ await disconnect(); return; }
+  connMenu.classList.toggle('open');
+});
+document.addEventListener('click', (e) => {
+  if (connMenu.classList.contains('open') && !connMenu.contains(e.target) && e.target !== connBtn){
+    connMenu.classList.remove('open');
+  }
+});
+
+btnConnUSB.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  connMenu.classList.remove('open');
+  printer_id = EPSON_VID;
+  await connectUSB();
+});
+btnConnSerial.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  connMenu.classList.remove('open');
+  printer_id = SUMNI_VID;
+  await connectUSB();
+});
+
 async function connectUSB(){
-  if (usbDevice){ await disconnect(); return; }
   if (!navigator.usb){
     showToast('Ο browser δεν υποστηρίζει WebUSB — χρησιμοποίησε Chrome σε Android', true);
     log('navigator.usb δεν υπάρχει (χρειάζεται Chrome/Android + ασφαλές context https ή localhost).');
     return;
   }
   try{
-    const dev = await navigator.usb.requestDevice({ filters:[{ vendorId: EPSON_VID }] });
+    const dev = await navigator.usb.requestDevice({ filters:[{ vendorId: printer_id }] });
     await openDevice(dev);
-    usbDevice = dev;
+    usbDevice = dev; printerMode = 'usb';
     setConnected(true);
-    showToast('Ο εκτυπωτής συνδέθηκε');
+    showToast('Ο εκτυπωτής Epson (USB) συνδέθηκε');
   }catch(err){
-    log('Σφάλμα σύνδεσης: ' + err);
+    log('Σφάλμα σύνδεσης USB: ' + err);
+    showToast('Αποτυχία σύνδεσης — δες Πληροφορίες σύνδεσης', true);
+    setConnected(false);
+  }
+}
+
+async function connectSerial(){
+  if (!('serial' in navigator)){
+    showToast('Ο browser δεν υποστηρίζει Web Serial — χρησιμοποίησε πρόσφατο Chrome σε Android', true);
+    log('navigator.serial δεν υπάρχει (χρειάζεται πρόσφατο Chrome/Android + ασφαλές context https ή localhost).');
+    return;
+  }
+  try{
+    // Ο ενσωματωμένος εκτυπωτής Sunmi εμφανίζεται στη λίστα ως Bluetooth
+    // συσκευή "InnerPrinter". Αν δεν εμφανιστεί, κάνε πρώτα Pairing στις
+    // ρυθμίσεις Bluetooth του Android.
+    const port = await navigator.serial.requestPort();
+    await openSerial(port);
+    serialPort = port; printerMode = 'serial';
+    setConnected(true);
+    showToast('Ο εκτυπωτής Sunmi (Bluetooth) συνδέθηκε');
+  }catch(err){
+    log('Σφάλμα σύνδεσης Bluetooth: ' + err);
     showToast('Αποτυχία σύνδεσης — δες Πληροφορίες σύνδεσης', true);
     setConnected(false);
   }
@@ -289,46 +319,88 @@ async function openDevice(dev){
   if (chosen.alt) { try { await dev.selectAlternateInterface(chosen.ifaceNum, chosen.alt); } catch(e){} }
   epOut = chosen.ep;
   usbIface = chosen.ifaceNum;
-  log(`Έτοιμος: interface ${usbIface}, endpoint OUT ${epOut}, class 0x${chosen.cls.toString(16)}`);
+  log(`Έτοιμος (USB): interface ${usbIface}, endpoint OUT ${epOut}, class 0x${chosen.cls.toString(16)}`);
+}
+
+async function openSerial(port){
+  // Το baudRate ουσιαστικά αγνοείται σε Bluetooth SPP, αλλά απαιτείται από το API.
+  await port.open({ baudRate: 115200 });
+  serialWriter = port.writable.getWriter();
+  log('Έτοιμη σύνδεση Web Serial (Bluetooth SPP) με τον εκτυπωτή.');
 }
 
 async function disconnect(){
-  try { if (usbDevice && usbIface != null) await usbDevice.releaseInterface(usbIface); } catch(e){}
-  try { if (usbDevice) await usbDevice.close(); } catch(e){}
+  try{
+    if (printerMode === 'usb'){
+      if (usbDevice && usbIface != null) await usbDevice.releaseInterface(usbIface);
+      if (usbDevice) await usbDevice.close();
+    } else if (printerMode === 'serial'){
+      if (serialWriter) await serialWriter.close();
+      if (serialPort) await serialPort.close();
+    }
+  }catch(e){}
   usbDevice = null; epOut = null; usbIface = null;
+  serialPort = null; serialWriter = null;
+  printerMode = null;
   setConnected(false);
   showToast('Ο εκτυπωτής αποσυνδέθηκε');
 }
 
 function setConnected(on){
   connBtn.classList.toggle('connected', on);
-  connLabel.textContent = on ? 'Συνδεδεμένος' : 'Σύνδεση Εκτυπωτή';
+  if (on){
+    connLabel.textContent = printerMode === 'usb' ? 'Συνδεδεμένος (Epson)' : 'Συνδεδεμένος (Sunmi)';
+  } else {
+    connLabel.textContent = 'Σύνδεση Εκτυπωτή';
+  }
 }
 
-// Αυτόματη επανασύνδεση αν έχει ήδη δοθεί άδεια (μία φορά -> κάθε φορά)
+// Αυτόματη επανασύνδεση αν έχει ήδη δοθεί άδεια (μία φορά -> κάθε φορά).
+// Ελέγχει πρώτα USB, μετά Bluetooth — όποιο έχει ήδη εξουσιοδοτημένη συσκευή.
 async function tryReconnect(){
-  if (!navigator.usb) {
-    showToast('Ο browser δεν υποστηρίζει WebUSB — χρησιμοποίησε Chrome σε Android', true);
-    return;
-  }
   try{
-    const devs = await navigator.usb.getDevices();
-    const epson = devs.find(d => d.vendorId === EPSON_VID);
-    if (epson){
-      await openDevice(epson);
-      usbDevice = epson;
-      setConnected(true);
-      log('Αυτόματη επανασύνδεση με αποθηκευμένο εκτυπωτή.');
+    if (navigator.usb){
+      const devs = await navigator.usb.getDevices();
+      const epson = devs.find(d => d.vendorId === printer_id);
+      if (epson){
+        await openDevice(epson);
+        usbDevice = epson; printerMode = 'usb';
+        setConnected(true);
+        log('Αυτόματη επανασύνδεση (USB/Epson).');
+        return;
+      }
     }
-  }catch(err){ log('Επανασύνδεση απέτυχε: ' + err); }
+  }catch(err){ log('Έλεγχος USB απέτυχε: ' + err); }
+  try{
+    if ('serial' in navigator){
+      const ports = await navigator.serial.getPorts();
+      if (ports.length){
+        await openSerial(ports[0]);
+        serialPort = ports[0]; printerMode = 'serial';
+        setConnected(true);
+        log('Αυτόματη επανασύνδεση (Bluetooth/Sunmi).');
+        return;
+      }
+    }
+  }catch(err){ log('Έλεγχος Bluetooth απέτυχε: ' + err); }
 }
 if (navigator.usb){
   navigator.usb.addEventListener('disconnect', e => {
-    if (usbDevice && e.device === usbDevice){
-      usbDevice = null; epOut = null; usbIface = null;
+    if (printerMode === 'usb' && usbDevice && e.device === usbDevice){
+      usbDevice = null; epOut = null; usbIface = null; printerMode = null;
       setConnected(false);
       showToast('Ο εκτυπωτής αποσυνδέθηκε', true);
-      log('Ο εκτυπωτής αποσυνδέθηκε φυσικά.');
+      log('Ο εκτυπωτής (USB) αποσυνδέθηκε φυσικά.');
+    }
+  });
+}
+if ('serial' in navigator){
+  navigator.serial.addEventListener('disconnect', e => {
+    if (printerMode === 'serial' && serialPort && e.target === serialPort){
+      serialPort = null; serialWriter = null; printerMode = null;
+      setConnected(false);
+      showToast('Ο εκτυπωτής αποσυνδέθηκε', true);
+      log('Ο εκτυπωτής (Bluetooth) αποσυνδέθηκε φυσικά.');
     }
   });
 }
@@ -425,8 +497,16 @@ const CUT_BYTES = new Uint8Array([0x1D,0x56,0x42,0x00]); // GS V B 0 partial cut
 
 async function sendToPrinter(bytes){
   const CHUNK = 8192;
-  for (let i=0;i<bytes.length;i+=CHUNK){
-    await usbDevice.transferOut(epOut, bytes.slice(i, i+CHUNK));
+  if (printerMode === 'usb'){
+    for (let i=0;i<bytes.length;i+=CHUNK){
+      await usbDevice.transferOut(epOut, bytes.slice(i, i+CHUNK));
+    }
+  } else if (printerMode === 'serial'){
+    for (let i=0;i<bytes.length;i+=CHUNK){
+      await serialWriter.write(bytes.slice(i, i+CHUNK));
+    }
+  } else {
+    throw new Error('Δεν υπάρχει συνδεδεμένος εκτυπωτής');
   }
 }
 
@@ -440,7 +520,7 @@ const NO_LID_ITEMS = [
 ];
 
 async function printItem(name, code, variant, price, tileEl){
-  if (!usbDevice || epOut == null){
+  if (!isConnected()){
     showToast('Σύνδεσε πρώτα τον εκτυπωτή', true);
     return;
   }
@@ -475,7 +555,7 @@ async function printItem(name, code, variant, price, tileEl){
     log('Σφάλμα εκτύπωσης: ' + err);
     showToast('Σφάλμα εκτύπωσης — δες Πληροφορίες σύνδεσης', true);
     // Αν χάθηκε η σύνδεση, μηδένισε την κατάσταση
-    if (String(err).includes('transfer') || String(err).includes('device')) { setConnected(false); }
+    if (String(err).includes('lost') || String(err).includes('device') || String(err).includes('closed') || String(err).includes('transfer')) { setConnected(false); printerMode = null; }
   }finally{
     setTimeout(()=> tileEl.classList.remove('printing'), 400);
   }
