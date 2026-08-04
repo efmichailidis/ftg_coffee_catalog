@@ -13,7 +13,14 @@
 <header>
   <h1>Ροφήματα <span>· Food to Go</span></h1>
   <input id="search" placeholder="Αναζήτηση προϊόντος...">
-  <button id="connBtn"><span id="dot"></span><span id="connLabel">Σύνδεση Εκτυπωτή</span></button>
+  <div id="connWrap"></div>
+    <button id="connBtn"><span id="dot"></span><span id="connLabel">Σύνδεση Εκτυπωτή</span></button>
+    <div id="connMenu">
+      <button id="epson">🖨️ Epson (USB)</button>
+      <button id="sunmi">🖨️ Sunmi (Bluetooth)</button>
+    </div>
+  </div>
+  <!-- <button id="connBtn"><span id="dot"></span><span id="connLabel">Σύνδεση Εκτυπωτή</span></button> -->
 </header>
 
 <main>
@@ -39,6 +46,8 @@
    Πλάτος χαρτιού 80mm -> 576 dots εκτυπώσιμα @203dpi.
    ============================================================ */
 const EPSON_VID = 0x04b8;
+const SUMNI_VID = 0x324F;
+var printer_id; 
 const PRINTER_DOTS = 576;   // εκτυπώσιμο πλάτος 80mm
 
 let usbDevice = null, epOut = null, usbIface = null;
@@ -49,6 +58,35 @@ const toast     = document.getElementById('toast');
 const logEl     = document.getElementById('log');
 const grid      = document.getElementById('grid');
 const searchInput = document.getElementById('search');
+
+const connMenu     = document.getElementById('connMenu');
+const epson    = document.getElementById('epson');
+const sunmi = document.getElementById('sunmi');
+
+connBtn.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (isConnected()){ await disconnect(); return; }
+  connMenu.classList.toggle('open');
+});
+document.addEventListener('click', (e) => {
+  if (connMenu.classList.contains('open') && !connMenu.contains(e.target) && e.target !== connBtn){
+    connMenu.classList.remove('open');
+  }
+});
+
+epson.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  connMenu.classList.remove('open');
+  printer_id = EPSON_VID;
+  await connectUSB();
+});
+
+sunmi.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  connMenu.classList.remove('open');
+  printer_id = SUMNI_VID;
+  await connectUSB();
+});
 
 function log(msg){
   const t = new Date().toLocaleTimeString();
@@ -132,6 +170,8 @@ function renderSpecialTile(){
   return tile;
 }
 
+
+
 async function printSpecialSelection(idx, mode, tileEl){
   const item = ITEMS[idx];
   if (!item) return;
@@ -205,8 +245,7 @@ document.getElementById('specialContainer').appendChild(renderSpecialTile());
 renderGrid();
 searchInput.addEventListener('input', () => renderGrid(searchInput.value));
 
-/* ---------------- WebUSB σύνδεση ---------------- */
-connBtn.addEventListener('click', async () => {
+async function connectUSB(){
   if (usbDevice){ await disconnect(); return; }
   if (!navigator.usb){
     showToast('Ο browser δεν υποστηρίζει WebUSB — χρησιμοποίησε Chrome σε Android', true);
@@ -224,7 +263,7 @@ connBtn.addEventListener('click', async () => {
     showToast('Αποτυχία σύνδεσης — δες Πληροφορίες σύνδεσης', true);
     setConnected(false);
   }
-});
+}
 
 async function openDevice(dev){
   log('Άνοιγμα: ' + (dev.productName || 'Epson') + ' (VID 0x' + dev.vendorId.toString(16) + ')');
