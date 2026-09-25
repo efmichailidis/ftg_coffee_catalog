@@ -45,11 +45,11 @@ const ITEMS = [
     { name: "Ζεστό ρόφημα σοκολάτας (επιλογή γεύσης σιροπιού)", ta: { price: "1,80€", code: "2391073000003" }, sit: { price: "1,95€", code: "2391127000003" } },
     { name: "Κρύο ρόφημα σοκολάτας (επιλογή γεύσης σιροπιού)", ta: { price: "1,80€", code: "2391072000004" }, sit: { price: "1,95€", code: "2391126000004" } },
     { name: "Τσάι με επιλογή γεύσεων", ta: { price: "0,95€", code: "2381833000008" }, sit: { price: "1,00€", code: "2390491000008" } },
-    
-    { name: "Smoothie Wild Berry ", ta: { price: null, code: "2391320000008" }, sit: { price: null, code: "2391316000005" } },
-    { name: "Smoothie Green Boost ", ta: { price: null, code: "2391321000007" }, sit: { price: null, code: "2391317000004" } },
-    { name: "Smoothie Peanut Butter Blast ", ta: { price: null, code: "2391322000006" }, sit: { price: null, code: "2391318000003" } },
-    { name: "Smoothie Summer Delight ", ta: { price: null, code: "2391323000005" }, sit: { price: null, code: "2391319000002" } },
+
+    { name: "Smoothie Wild Berry ", ta: { price: null, code: "2391316000005" }, sit: { price: null, code: "2391320000008" } },
+    { name: "Smoothie Green Boost ", ta: { price: null, code: "2391317000004" }, sit: { price: null, code: "2391321000007" } },
+    { name: "Smoothie Peanut Butter Blast ", ta: { price: null, code: "2391318000003" }, sit: { price: null, code: "2391322000006" } },
+    { name: "Smoothie Summer Delight ", ta: { price: null, code: "2391319000002" }, sit: { price: null, code: "2391323000005" } },
     
     { name: "Κύπελλο", ta: { price: "0,05€", code: "5208046089286" }, sit: null },
     { name: "Κουπόνι έκπτωσης πλαστικού μιας χρήσης", ta: { price: "0,05€", code: "9821955270055" }, sit: null },
